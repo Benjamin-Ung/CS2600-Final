@@ -37,18 +37,22 @@ enum editorKey {
 };
 
 enum editorHighlight {
-     HL_NORMAL = 0,
+    HL_NORMAL = 0,
+    HL_COMMENT,
+    HL_STRING,
     HL_NUMBER,
     HL_MATCH
 };
 
 #define HL_HIGHLIGHT_NUMBERS (1<<0)
+#define HL_HIGHLIGHT_STRINGS (1<<1)
 
 /*** data ***/
 struct editorSyntax {
-  char *filetype;
-  char **filematch;
-  int flags;
+    char *filetype;
+    char **filematch;
+    char *singleline_comment_start;
+    int flags;
 };
 
 typedef struct erow {
@@ -83,7 +87,8 @@ struct editorSyntax HLDB[] = {
   {
     "c",
     C_HL_extensions,
-    HL_HIGHLIGHT_NUMBERS
+    "//",
+    HL_HIGHLIGHT_NUMBERS | HL_HIGHLIGHT_STRINGS
   },
 };
 #define HLDB_ENTRIES (sizeof(HLDB) / sizeof(HLDB[0]))
@@ -209,32 +214,18 @@ void editorUpdateSyntax(erow *row) {
     row->hl = realloc(row->hl, row->rsize);
     memset(row->hl, HL_NORMAL, row->rsize);
 
-    if (E.syntax == NULL) return;
-
-    int prev_sep = 1;
-
     int i = 0;
-    while (i < row->rsize) {
-        char c = row->render[i];
-        unsigned char prev_hl = (i > 0) ? row->hl[i - 1] : HL_NORMAL;
-
-        if (E.syntax->flags & HL_HIGHLIGHT_NUMBERS) {
-            if ((isdigit(c) && (prev_sep || prev_hl == HL_NUMBER)) ||
-            (c == '.' && prev_hl == HL_NUMBER)) {
-                row->hl[i] = HL_NUMBER;
-                i++;
-                prev_sep = 0;
-                continue;
-            }
-
-            prev_sep = is_separator(c);
-            i++;
+    for (i = 0; i < row->rsize; i++) {
+        if (isdigit(row->render[i])) {
+        row->hl[i] = HL_NUMBER;
         }
     }
 }
 
 int editorSyntaxToColor(int hl) {
   switch (hl) {
+    case HL_COMMENT: return 36;
+    case HL_STRING: return 35;
     case HL_NUMBER: return 31;
     case HL_MATCH: return 34;
     default: return 37;
@@ -253,12 +244,20 @@ void editorSelectSyntaxHighlight() {
       if ((is_ext && ext && !strcmp(ext, s->filematch[i])) ||
           (!is_ext && strstr(E.filename, s->filematch[i]))) {
         E.syntax = s;
+
+         int filerow;
+        for (filerow = 0; filerow < E.numrows; filerow++) {
+          editorUpdateSyntax(&E.row[filerow]);
+        }
+
         return;
       }
       i++;
     }
   }
 }
+
+
 /*** row operations ***/
 int editorRowCxToRx(erow *row, int cx) {
   int rx = 0;
@@ -625,14 +624,13 @@ void editorDrawRows(struct abuf *ab) {
                     abAppend(ab, &c[j], 1);
                 } else {
                     int color = editorSyntaxToColor(hl[j]);
-                     if (color != current_color) {
+                    if (color != current_color) {
                         current_color = color;
-                    
                         char buf[16];
                         int clen = snprintf(buf, sizeof(buf), "\x1b[%dm", color);
                         abAppend(ab, buf, clen);
-                        abAppend(ab, &c[j], 1);
-                     }
+                    }
+                    abAppend(ab, &c[j], 1);
                 }
             }
             abAppend(ab, "\x1b[39m", 5);
